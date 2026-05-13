@@ -1,0 +1,985 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Hanta Virus Ship Game | Retro Browser Game</title>
+<meta name="description" content="Hanta Virus Ship Game är ett retroinspirerat browser-spel där du ska sänka ett virusskepp utanför Teneriffas kust med en kanon." />
+<meta name="keywords" content="Hanta Virus Ship Game, retro game, browser game, pixel game, cannon game, Tenerife" />
+<meta name="author" content="Karl Blau" />
+
+<meta property="og:title" content="Hanta Virus Ship Game" />
+<meta property="og:description" content="Sänk virusskeppet innan det når Teneriffas kust. Ett retroinspirerat browser-spel i pixelstil." />
+<meta property="og:type" content="website" />
+<meta property="og:image" content="preview.png" />
+
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Hanta Virus Ship Game" />
+<meta name="twitter:description" content="Sänk virusskeppet innan det når Teneriffas kust." />
+<meta name="twitter:image" content="preview.png" />
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #171717;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: white;
+    }
+
+    .wrap {
+      width: min(960px, 100vw);
+      padding: 16px;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 24px;
+      letter-spacing: 0.5px;
+    }
+
+    .hint {
+      margin: 0 0 12px;
+      color: #d4d4d4;
+      font-size: 14px;
+      line-height: 1.4;
+    }
+
+    canvas {
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      display: block;
+      background: #77a9d8;
+      image-rendering: pixelated;
+      border: 4px solid #eee;
+      border-radius: 8px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.35);
+    }
+    .seo-text {
+
+  margin-top: 16px;
+
+  color: #d4d4d4;
+
+  font-size: 14px;
+
+  line-height: 1.5;
+
+}
+
+.seo-text h2 {
+
+  margin: 0 0 6px;
+
+  font-size: 18px;
+
+  color: white;
+
+}
+
+.seo-text p {
+
+  margin: 0;
+
+}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Hanta Virus Ship Game</h1>
+    <p class="hint">
+  Sänk virusskeppet innan det når Teneriffas kust. Piltangenter: ändra vinkel och kraft. Space: skjut. R: starta om.
+</p>
+    <canvas id="game" width="960" height="540"></canvas>
+
+      <section class="seo-text">
+
+    <h2>Om spelet</h2>
+
+    <p>
+
+      Hanta Virus Ship Game är ett litet retroinspirerat browser-spel där du använder en kanon för att stoppa ett virusskepp innan det når Teneriffas kust.
+
+    </p>
+
+  </section>
+  </div>
+
+  <script>
+    const canvas = document.getElementById("game");
+    const ctx = canvas.getContext("2d");
+
+    const W = canvas.width;
+    const H = canvas.height;
+
+    const groundY = 410;
+    const seaY = 180;
+    const cannon = {
+      x: 105,
+      y: groundY - 25,
+      angle: 42,
+      power: 62,
+    };
+
+    const ship = {
+      x: 560,
+      y: seaY + 54,
+      baseY: seaY + 54,
+      baseW: 330,
+      maxW: 560,
+      approach: 0,
+      w: 330,
+      h: 58,
+      speed: -0.14,
+      hit: false,
+      sinking: 0,
+    };
+
+    let projectile = null;
+    let score = 0;
+    let shots = 0;
+    let message = "Justera vinkel och kraft. Space skjuter.";
+    let messageTimer = 0;
+    let wind = -0.018;
+    let frame = 0;
+    let gameStarted = false;
+    let gameOver = false;
+
+    const keys = new Set();
+
+
+    // MUSIC
+    const bgMusic = new Audio("music/intro_8bit_style.mp3");
+    bgMusic.loop = true;
+    bgMusic.volume = 0.35;
+
+    let musicStarted = false;
+
+    function startMusic() {
+      if (musicStarted) return;
+      
+      musicStarted = true;
+      bgMusic.play().catch((err) => {
+        console.log("Musiken kunde inte startas:", err);
+  });
+}
+
+
+// SOUND EFFECTS
+const cannonSound = new Audio("sounds/canon.mp3");
+const blastSound = new Audio("sounds/blast.mp3");
+const fallingSound = new Audio("sounds/falling.mp3");
+cannonSound.volume = 0.75;
+blastSound.volume = 0.85;
+fallingSound.volume = 0.45;
+//fallingSound.loop = true;
+
+
+function playSound(sound) {
+  sound.currentTime = 0;
+  sound.play().catch((err) => {
+    console.log("Ljud kunde inte spelas:", err);
+  });
+}
+
+function stopSound(sound) {
+  sound.pause();
+  sound.currentTime = 0;
+}
+
+
+// END SOUND
+
+
+
+    window.addEventListener("keydown", (e) => {
+      if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space", "Enter"].includes(e.code)) {
+        e.preventDefault();
+      }
+
+      if (!gameStarted) {
+        if (e.code === "Space" || e.code === "Enter") {
+          gameStarted = true;
+          startMusic();
+          setMessage("Stoppa Hanta Virus-skeppet!", 140);
+        }
+        return;
+      }
+
+      startMusic();
+
+      keys.add(e.code);
+
+      if (e.code === "Space") shoot();
+      if (e.code === "KeyR") resetGame();
+    });
+
+    canvas.addEventListener("click", () => {
+      if (!gameStarted) {
+        gameStarted = true;
+        startMusic();
+        setMessage("Stoppa Hanta Virus-skeppet!", 140);
+      }
+    });
+
+    window.addEventListener("keyup", (e) => {
+      keys.delete(e.code);
+    });
+
+    function resetGame() {
+      stopSound(fallingSound);
+      projectile = null;
+      score = 0;
+      shots = 0;
+      ship.x = 560;
+      ship.speed = -0.14;
+      ship.hit = false;
+      ship.sinking = 0;
+      ship.approach = 0;
+      ship.w = ship.baseW;
+      ship.y = ship.baseY;
+      gameOver = false;
+      cannon.angle = 42;
+      cannon.power = 62;
+      wind = -0.018;
+      setMessage("Ny runda. Fartyget anar ingenting.", 160);
+    }
+
+    function shoot() {
+      if (projectile) return;
+      if (ship.hit) return;
+      if (gameOver) return;
+
+      const rad = cannon.angle * Math.PI / 180;
+      const barrelLength = 48;
+      const startX = cannon.x + Math.cos(rad) * barrelLength;
+      const startY = cannon.y - Math.sin(rad) * barrelLength;
+      const speed = cannon.power / 5.2;
+
+      projectile = {
+        x: startX,
+        y: startY,
+        vx: Math.cos(rad) * speed,
+        vy: -Math.sin(rad) * speed,
+        r: 5,
+      };
+
+      shots++;
+      playSound(cannonSound);
+      playSound(fallingSound);
+      setMessage("Eld!", 50);
+    }
+
+    function setMessage(text, frames = 120) {
+      message = text;
+      messageTimer = frames;
+    }
+
+    function update() {
+      frame++;
+      if (!gameStarted) return;
+      if (gameOver) {
+        if (messageTimer > 0) messageTimer--;
+        return;
+      }
+
+      if (keys.has("ArrowUp")) cannon.angle = Math.min(80, cannon.angle + 0.8);
+      if (keys.has("ArrowDown")) cannon.angle = Math.max(12, cannon.angle - 0.8);
+      if (keys.has("ArrowRight")) cannon.power = Math.min(100, cannon.power + 0.8);
+      if (keys.has("ArrowLeft")) cannon.power = Math.max(15, cannon.power - 0.8);
+
+      if (!ship.hit && !gameOver) {
+        const oldCenter = ship.x + ship.w / 2;
+        ship.approach = Math.min(1, ship.approach + 0.00042);
+        ship.w = ship.baseW + (ship.maxW - ship.baseW) * ship.approach;
+        ship.y = ship.baseY + 82 * ship.approach;
+
+        ship.x = oldCenter - ship.w / 2;
+        ship.x += ship.speed;
+        if (ship.x < 390 || ship.x + ship.w > 940) ship.speed *= -1;
+
+        if (ship.approach >= 1) {
+          gameOver = true;
+          projectile = null;
+          stopSound(fallingSound);
+          setMessage("Viruset nådde stranden...", 99999);
+        }
+      } else if (ship.sinking > 0) {
+        ship.sinking++;
+        // Skeppet ska inte falla ner mot stranden.
+        // Det sjunker visuellt genom att vattnet "äter upp" det underifrån.
+        ship.y = ship.baseY;
+      }
+
+      if (projectile) {
+        projectile.vx += wind;
+        projectile.vy += 0.18;
+        projectile.x += projectile.vx;
+        projectile.y += projectile.vy;
+
+        const hitShip =
+          projectile.x > ship.x &&
+          projectile.x < ship.x + ship.w &&
+          projectile.y > ship.y - ship.h - 40 &&
+          projectile.y < ship.y + 8;
+
+        if (hitShip && !ship.hit) {
+          stopSound(fallingSound);
+          playSound(blastSound);
+
+          ship.hit = true;
+          ship.sinking = 1;
+          projectile = null;
+          score += 100;
+          setMessage("Fullträff du har räddat världen!", 260);
+        } else if (projectile.y > seaY && projectile.x > 220 && projectile.y < groundY) {
+                    stopSound(fallingSound);
+
+          projectile = null;
+          setMessage(randomMiss(), 150);
+        } else if (projectile.x < -50 || projectile.x > W + 50 || projectile.y > H + 50) {
+                    stopSound(fallingSound);
+
+          projectile = null;
+          setMessage("Kulan försvann någonstans. Pinsamt.", 150);
+        }
+      }
+
+      if (messageTimer > 0) messageTimer--;
+      else if (!ship.hit) message = "";
+    }
+
+    function randomMiss() {
+      const texts = [
+        "Plask. Fiskarna är inte imponerade.",
+        "Miss. Kaptenen fortsätter äta räkmacka.",
+        "Nära nog för att väcka en mås.",
+        "Vattnet tog smällen. Fartyget skrattar.",
+      ];
+      return texts[Math.floor(Math.random() * texts.length)];
+    }
+
+    function rect(x, y, w, h, color) {
+      ctx.fillStyle = color;
+      ctx.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h));
+    }
+
+    function drawSky() {
+      rect(0, 0, W, seaY, "#93bfe5");
+      rect(90, 60, 70, 14, "#cfe3f2");
+      rect(130, 48, 55, 18, "#cfe3f2");
+      rect(630, 42, 90, 14, "#cfe3f2");
+      rect(675, 31, 65, 18, "#cfe3f2");
+    }
+
+    function drawSea() {
+      rect(0, seaY, W, groundY - seaY, "#1f5e85");
+      for (let y = seaY + 24; y < groundY; y += 34) {
+        for (let x = 0; x < W; x += 72) {
+          rect(x + ((y / 2) % 40), y, 34, 3, "rgba(255,255,255,0.28)");
+        }
+      }
+
+      drawSwimmers();
+    }
+
+    function drawSwimmers() {
+      const swimmers = [
+        { x: 435, y: groundY - 38, phase: 0, hair: "#2b1b12", skin: "#e0a06f", suit: "#d84b5a" },
+        { x: 505, y: groundY - 58, phase: 1.7, hair: "#f1d06b", skin: "#efb987", suit: "#2f8ed8" },
+        { x: 610, y: groundY - 42, phase: 3.1, hair: "#3a2417", skin: "#c8865a", suit: "#36b06f" },
+        { x: 700, y: groundY - 70, phase: 4.4, hair: "#1a1a1a", skin: "#d89a72", suit: "#f0e05a" },
+      ];
+
+      swimmers.forEach((p, i) => {
+        const bob = Math.sin(frame * 0.06 + p.phase) * 4;
+        const swim = Math.sin(frame * 0.025 + p.phase) * 8;
+        const x = p.x + swim;
+        const y = p.y + bob;
+
+        // Små vågor runt badaren
+        rect(x - 22, y + 10, 16, 3, "rgba(210,240,255,0.55)");
+        rect(x + 8, y + 12, 20, 3, "rgba(210,240,255,0.45)");
+        rect(x - 4, y + 17, 18, 2, "rgba(210,240,255,0.35)");
+
+        // Huvud och hår
+        rect(x - 6, y - 8, 12, 12, p.skin);
+        rect(x - 7, y - 11, 14, 5, p.hair);
+
+        // Kropp som bara syns precis ovanför vattenytan
+        rect(x - 9, y + 4, 18, 8, p.suit);
+
+        // En arm som paddlar lite
+        const armUp = Math.sin(frame * 0.12 + p.phase) > 0;
+        if (armUp) {
+          rect(x - 20, y + 3, 14, 4, p.skin);
+          rect(x + 8, y + 8, 14, 4, p.skin);
+        } else {
+          rect(x - 18, y + 9, 13, 4, p.skin);
+          rect(x + 7, y + 3, 15, 4, p.skin);
+        }
+      });
+    }
+
+    function drawBeach() {
+      rect(0, groundY, W, H - groundY, "#cbb98b");
+      rect(0, groundY, W, 8, "#d8c89a");
+      for (let i = 0; i < 120; i++) {
+        const x = (i * 83) % W;
+        const y = groundY + 16 + ((i * 31) % 100);
+        rect(x, y, 3, 2, "rgba(85,65,38,0.35)");
+      }
+
+      // Pir / stenmur nere vid vattnet
+      rect(240, groundY - 18, 170, 18, "#8c7b5d");
+      rect(248, groundY - 28, 150, 12, "#a18d69");
+
+      drawPalm(790, groundY + 10, 1.05);
+      drawPalm(850, groundY + 24, 0.82);
+      drawTenerifeSign(585, groundY + 54);
+    }
+
+    function drawPalm(x, y, scale) {
+      const s = scale;
+
+      // Böjd stam i pixelstil
+      rect(x, y - 80 * s, 10 * s, 82 * s, "#7a4b26");
+      rect(x + 8 * s, y - 70 * s, 8 * s, 70 * s, "#8a5a2f");
+      rect(x + 2 * s, y - 62 * s, 14 * s, 5 * s, "#5d351d");
+      rect(x + 4 * s, y - 44 * s, 14 * s, 5 * s, "#5d351d");
+      rect(x + 5 * s, y - 26 * s, 14 * s, 5 * s, "#5d351d");
+
+      const topX = x + 8 * s;
+      const topY = y - 84 * s;
+
+      // Palmblad
+      rect(topX - 52 * s, topY + 2 * s, 55 * s, 10 * s, "#1e7a3a");
+      rect(topX - 42 * s, topY - 12 * s, 46 * s, 10 * s, "#258c45");
+      rect(topX - 28 * s, topY - 28 * s, 36 * s, 10 * s, "#2f9e50");
+      rect(topX + 2 * s, topY - 30 * s, 42 * s, 10 * s, "#258c45");
+      rect(topX + 8 * s, topY - 12 * s, 52 * s, 10 * s, "#1e7a3a");
+      rect(topX + 4 * s, topY + 5 * s, 56 * s, 10 * s, "#2f9e50");
+      rect(topX - 10 * s, topY + 12 * s, 35 * s, 9 * s, "#1d6f35");
+
+      // Kokosnötter
+      rect(topX - 3 * s, topY - 3 * s, 7 * s, 7 * s, "#5a351c");
+      rect(topX + 6 * s, topY + 2 * s, 7 * s, 7 * s, "#5a351c");
+    }
+
+    function drawTenerifeSign(x, y) {
+      // Stolpar
+      rect(x + 12, y - 55, 8, 58, "#5b3a22");
+      rect(x + 155, y - 55, 8, 58, "#5b3a22");
+
+      // Skylt
+      rect(x, y - 100, 178, 52, "#7b4f2b");
+      rect(x + 6, y - 94, 166, 40, "#9b6a38");
+      rect(x + 10, y - 90, 158, 6, "rgba(255,255,255,0.18)");
+
+      ctx.fillStyle = "#fff4c7";
+      ctx.font = "24px monospace";
+      ctx.textAlign = "center";
+      ctx.fillText("TENERIFFA", x + 89, y - 67);
+      ctx.textAlign = "left";
+
+      // Pil som pekar mot havet
+      ctx.fillStyle = "#fff4c7";
+      ctx.beginPath();
+      ctx.moveTo(x + 144, y - 78);
+      ctx.lineTo(x + 162, y - 72);
+      ctx.lineTo(x + 144, y - 66);
+      ctx.closePath();
+      //ctx.fill();
+    }
+
+    function drawShip() {
+      const x = ship.x;
+      const y = ship.y;
+      const s = ship.w / 330;
+      const sink = ship.sinking;
+      const tilt = 0;
+
+      // När skeppet träffats: först delas det i två stora delar, sedan blir det mindre vrakdelar.
+      if (sink > 0) {
+        const t = sink;
+        const foamY = ship.baseY - 8;
+
+        // Vitt skum runt vrakplatsen
+        rect(x + 18, foamY, 95, 5, "rgba(245,255,255,0.95)");
+        rect(x + 128, foamY + 5, 128, 5, "rgba(245,255,255,0.8)");
+        rect(x + 265, foamY + 1, 76, 5, "rgba(245,255,255,0.9)");
+        rect(x + 60, foamY + 16, 58, 3, "rgba(245,255,255,0.55)");
+        rect(x + 210, foamY + 18, 85, 3, "rgba(245,255,255,0.55)");
+
+        if (t < 70) {
+          // Stor pixel-explosion vid träff
+          const pulse = Math.sin(frame * 0.35) * 4;
+          const cx = x + 170;
+          const cy = y - 58;
+
+          // Yttre eldklot
+          rect(cx - 58 - pulse, cy - 18, 116 + pulse * 2, 28, "#ff4a2f");
+          rect(cx - 42, cy - 36 - pulse, 84, 64 + pulse * 2, "#ff6f2f");
+          rect(cx - 24, cy - 52, 48, 88, "#ff9f2f");
+          rect(cx - 72, cy - 4, 28, 22, "#ffcc44");
+          rect(cx + 44, cy - 10, 34, 26, "#ffcc44");
+
+          // Ljus kärna
+          rect(cx - 25, cy - 18, 50, 36, "#fff06a");
+          rect(cx - 13, cy - 32, 26, 64, "#fff6a8");
+
+          // Svart/grå rök runt explosionen
+          rect(cx - 82, cy - 46, 34, 24, "#2d2d2d");
+          rect(cx + 48, cy - 58, 48, 30, "#242424");
+          rect(cx + 70, cy - 20, 30, 22, "#3a3a3a");
+          rect(cx - 74, cy + 18, 46, 24, "#3b3b3b");
+          rect(cx - 12, cy - 75, 42, 22, "#2b2b2b");
+
+          // Små splitter som flyger ut
+          rect(cx - 100 - t, cy - 12 - t * 0.2, 18, 5, "#101923");
+          rect(cx + 88 + t * 0.7, cy - 20 - t * 0.15, 20, 5, "#101923");
+          rect(cx - 62 - t * 0.35, cy + 44 + t * 0.12, 16, 5, "#a9423c");
+          rect(cx + 42 + t * 0.45, cy + 38 + t * 0.1, 18, 5, "#e5eaee");
+        }
+
+        function drawShipHalf(cx, cy, angle, side) {
+          ctx.save();
+          ctx.translate(cx, cy);
+          ctx.rotate(angle);
+          ctx.translate(-cx, -cy);
+
+          if (side === "back") {
+            // Bakre halvan, vänster del av fartyget
+            rect(cx - 122, cy + 0, 112, 13, "#101923");
+            rect(cx - 132, cy - 15, 132, 18, "#1a2631");
+            rect(cx - 92, cy - 35, 92, 18, "#e5eaee");
+            rect(cx - 76, cy - 49, 76, 14, "#f4f6f7");
+            rect(cx - 48, cy - 62, 48, 12, "#eef2f4");
+            for (let i = 0; i < 9; i++) rect(cx - 82 + i * 8, cy - 28, 4, 3, "#6f9fbd");
+            for (let i = 0; i < 7; i++) rect(cx - 66 + i * 8, cy - 43, 4, 3, "#6f9fbd");
+          } else {
+            // Främre halvan, höger del av fartyget med röd livbåt
+            rect(cx + 8, cy + 0, 114, 13, "#101923");
+            rect(cx + 0, cy - 15, 132, 18, "#1a2631");
+            rect(cx + 0, cy - 35, 72, 16, "#dfe5e9");
+            rect(cx + 22, cy - 46, 42, 11, "#f2f5f6");
+            rect(cx + 36, cy - 58, 2, 28, "#52606a");
+            rect(cx + 62, cy - 30, 50, 10, "#a9423c");
+            for (let i = 0; i < 5; i++) rect(cx + 10 + i * 9, cy - 28, 4, 3, "#6f9fbd");
+          }
+
+          ctx.restore();
+        }
+
+        if (t < 95) {
+          // Fas 1: skeppet bryts i två stora delar.
+          // Förren roterar klockvis, aktern roterar moturs.
+          const p = Math.min(1, t / 95);
+          const backAngle = Math.PI / 2 * p;
+          const frontAngle = -Math.PI / 2 * p;
+          const drop = p * 22;
+          const split = p * 42;
+
+          drawShipHalf(x + 155 - split, y - 25 + drop, backAngle, "back");
+          drawShipHalf(x + 165 + split, y - 25 + drop, frontAngle, "front");
+        } else {
+          // Fas 2: de två delarna har brutits upp till mindre bitar.
+          const tt = t - 95;
+          const drop = Math.min(90, tt * 0.72);
+          const spread = Math.min(95, tt * 0.7);
+
+          function debris(dx, dy, w, h, color, phase, life) {
+            if (tt > life) return;
+            const bob = Math.sin(frame * 0.08 + phase) * 3;
+            const drift = Math.sin(frame * 0.035 + phase) * 6;
+            rect(x + dx + drift + spread * Math.sin(phase), y + dy + drop + bob, w, h, color);
+          }
+
+          debris(36, -30, 82, 12, "#101923", 0.4, 95);
+          debris(118, -42, 68, 10, "#e5eaee", 1.2, 110);
+          debris(196, -36, 72, 12, "#1a2631", 2.3, 100);
+          debris(232, -52, 48, 10, "#a9423c", 3.1, 85);
+          debris(150, -64, 52, 9, "#f4f6f7", 4.0, 120);
+          debris(78, -58, 36, 8, "#dfe5e9", 5.0, 75);
+          debris(266, -26, 44, 8, "#101923", 5.9, 90);
+          debris(178, -20, 28, 6, "#8a5a2f", 2.8, 80);
+        }
+
+        const bubbleBase = ship.baseY + 12;
+        rect(x + 120, bubbleBase - ((t * 1.3) % 90), 5, 5, "rgba(220,245,255,0.75)");
+        rect(x + 190, bubbleBase - ((t * 1.7) % 80), 4, 4, "rgba(220,245,255,0.65)");
+        rect(x + 250, bubbleBase - ((t * 1.1) % 70), 3, 3, "rgba(220,245,255,0.6)");
+        rect(x + 85, bubbleBase - ((t * 1.55) % 75), 4, 4, "rgba(220,245,255,0.65)");
+
+        return;
+      }
+
+      ctx.save();
+
+      // Vid sänkning får skeppet bara ritas i havet, och aldrig nära strandkanten.
+      if (sink > 0) {
+        ctx.beginPath();
+        ctx.rect(0, seaY, W, groundY - seaY - 26);
+        ctx.clip();
+      }
+
+      if (sink > 0) {
+        // Rotera bara fartyget runt sin egen mittpunkt.
+        // Tidigare kunde canvas-transformen läcka vidare om något avbröts.
+        ctx.translate(x + ship.w / 2, y - 30);
+        ctx.rotate(tilt);
+        ctx.translate(-(x + ship.w / 2), -(y - 30));
+      }
+
+      function sx(v) { return x + v * s; }
+      function sw(v) { return v * s; }
+
+      if (ship.hit && sink < 90) {
+        // Första explosionen
+        rect(sx(146), y - 88, sw(20), 20, "#ffdd55");
+        rect(sx(130), y - 72, sw(55), 18, "#ff8a3d");
+        rect(sx(168), y - 68, sw(45), 15, "#ff3b2f");
+        rect(sx(190), y - 96, sw(34), 18, "#262626");
+        rect(sx(116), y - 96, sw(22), 14, "#3b3b3b");
+      } else if (ship.hit && sink < 190) {
+        // Rök efter explosion
+        rect(sx(132), y - 100, sw(38), 22, "#3a3a3a");
+        rect(sx(165), y - 118, sw(46), 28, "#2b2b2b");
+        rect(sx(204), y - 94, sw(30), 18, "#4a4a4a");
+      }
+
+      // Viktigast: originalfartyget är långt och lågt.
+      // Den här versionen är utdragen cirka 2x jämfört med tidigare.
+
+      // Vitt skum/vågor runt skeppet när det sjunker
+      if (ship.hit) {
+        const foamY = Math.min(groundY - 18, y + 6);
+        rect(sx(32), foamY, sw(72), 4, "rgba(235,250,255,0.9)");
+        rect(sx(118), foamY + 6, sw(96), 4, "rgba(235,250,255,0.75)");
+        rect(sx(218), foamY + 2, sw(78), 4, "rgba(235,250,255,0.85)");
+        rect(sx(72), foamY + 13, sw(46), 3, "rgba(235,250,255,0.55)");
+        rect(sx(245), foamY + 14, sw(38), 3, "rgba(235,250,255,0.55)");
+      }
+
+      // Fjärrskugga i vattnet
+      rect(sx(15), y + 7, sw(285), 3, "rgba(0,0,0,0.18)");
+
+      // Långt mörkt huvudskrov med låg profil
+      ctx.fillStyle = "#1a2631";
+      ctx.beginPath();
+      ctx.moveTo(sx(0), y - 18);       // spetsig akter
+      ctx.lineTo(sx(48), y + 5);
+      ctx.lineTo(sx(270), y + 5);
+      ctx.lineTo(sx(330), y - 17);     // lång spetsig för
+      ctx.lineTo(sx(286), y - 29);
+      ctx.lineTo(sx(42), y - 30);
+      ctx.closePath();
+      ctx.fill();
+
+      // Svart nederdel, lång och nästan rak
+      ctx.fillStyle = "#101923";
+      ctx.beginPath();
+      ctx.moveTo(sx(48), y - 9);
+      ctx.lineTo(sx(70), y + 2);
+      ctx.lineTo(sx(260), y + 2);
+      ctx.lineTo(sx(292), y - 9);
+      ctx.lineTo(sx(270), y - 14);
+      ctx.lineTo(sx(60), y - 14);
+      ctx.closePath();
+      ctx.fill();
+
+      // Tunn ljus linje ovanpå skrovet
+      rect(sx(56), y - 32, sw(210), 3, "#d8dde0");
+
+      // Mörka ändar som i fotot
+      rect(sx(14), y - 31, sw(62), 11, "#1c2935");
+      rect(sx(262), y - 30, sw(45), 10, "#1c2935");
+
+      // Lång vit överbyggnad, placerad vänster/mitten
+      rect(sx(86), y - 50, sw(138), 20, "#e5eaee");
+      rect(sx(104), y - 65, sw(112), 15, "#f4f6f7");
+      rect(sx(130), y - 78, sw(72), 13, "#eef2f4");
+
+      // Sluttande vänsterfront på överbyggnaden
+      ctx.fillStyle = "#e5eaee";
+      ctx.beginPath();
+      ctx.moveTo(sx(66), y - 30);
+      ctx.lineTo(sx(86), y - 50);
+      ctx.lineTo(sx(104), y - 50);
+      ctx.lineTo(sx(86), y - 30);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.fillStyle = "#f4f6f7";
+      ctx.beginPath();
+      ctx.moveTo(sx(94), y - 50);
+      ctx.lineTo(sx(114), y - 65);
+      ctx.lineTo(sx(132), y - 65);
+      ctx.lineTo(sx(112), y - 50);
+      ctx.closePath();
+      ctx.fill();
+
+      // Höger däck/brygga, men fortfarande låg
+      rect(sx(222), y - 56, sw(66), 16, "#dfe5e9");
+      rect(sx(240), y - 67, sw(36), 11, "#f2f5f6");
+
+      // Röd livbåt/oval på högersidan, proportionellt utdragen
+      ctx.fillStyle = "#a9423c";
+      ctx.beginPath();
+      ctx.ellipse(sx(247), y - 47, sw(28), 8, 0, 0, Math.PI * 2);
+      ctx.fill();
+      rect(sx(222), y - 47, sw(50), 8, "#a9423c");
+      rect(sx(228), y - 52, sw(38), 3, "#d06b63");
+
+      // Mörka takdetaljer
+      rect(sx(224), y - 70, sw(46), 4, "#39444e");
+      rect(sx(258), y - 63, sw(36), 5, "#39444e");
+
+      // Många små fönster längs hela överbyggnaden
+      const win = "#6f9fbd";
+      for (let i = 0; i < 16; i++) rect(sx(94 + i * 8), y - 43, sw(4), 3, win);
+      for (let i = 0; i < 13; i++) rect(sx(114 + i * 8), y - 58, sw(4), 3, win);
+      for (let i = 0; i < 8; i++) rect(sx(138 + i * 8), y - 72, sw(4), 3, win);
+      for (let i = 0; i < 5; i++) rect(sx(235 + i * 9), y - 51, sw(4), 3, win);
+
+      // Mast längre bak/mitten-höger
+      rect(sx(206), y - 105, sw(2), 28, "#52606a");
+      rect(sx(190), y - 96, sw(34), 2, "#52606a");
+      rect(sx(210), y - 116, sw(1), 11, "#52606a");
+      rect(sx(222), y - 88, sw(2), 13, "#52606a");
+
+      // Små mörka detaljer ovanpå däcket
+      rect(sx(152), y - 82, sw(26), 4, "#6e7880");
+      rect(sx(188), y - 81, sw(16), 3, "#6e7880");
+
+      // Highlights
+      rect(sx(88), y - 51, sw(134), 2, "rgba(255,255,255,0.55)");
+      rect(sx(108), y - 66, sw(106), 2, "rgba(255,255,255,0.65)");
+      rect(sx(132), y - 79, sw(70), 2, "rgba(255,255,255,0.45)");
+
+      if (ship.hit) {
+        // Extra vitt skum när skeppet nästan är under ytan
+        if (sink > 120) {
+          const foamY = Math.min(groundY - 16, y - 4);
+          rect(sx(42), foamY, sw(230), 5, "rgba(245,255,255,0.95)");
+          rect(sx(70), foamY + 10, sw(170), 4, "rgba(245,255,255,0.7)");
+          rect(sx(118), foamY + 19, sw(85), 3, "rgba(245,255,255,0.55)");
+        }
+
+        // Bubblor och bråte när det sjunker
+        const bubbleY = y - 20 - (sink % 50);
+        rect(sx(38), bubbleY, sw(5), 5, "rgba(220,245,255,0.75)");
+        rect(sx(285), bubbleY + 18, sw(4), 4, "rgba(220,245,255,0.65)");
+        rect(sx(248), bubbleY - 11, sw(3), 3, "rgba(220,245,255,0.65)");
+        rect(sx(130), y - 18, sw(18), 4, "#5a3b24");
+        rect(sx(196), y - 12, sw(24), 4, "#5a3b24");
+      }
+
+      ctx.restore();
+
+      
+    }
+
+    function drawCannon() {
+      const rad = cannon.angle * Math.PI / 180;
+      const bx = cannon.x;
+      const by = cannon.y;
+
+      // Liten sten-/träplattform under kanonen
+      rect(bx - 42, by + 38, 92, 8, "#5d4630");
+      rect(bx - 36, by + 31, 78, 8, "#8a6b45");
+      rect(bx - 30, by + 24, 64, 8, "#a98455");
+      rect(bx - 40, by + 47, 10, 6, "#3a2a1d");
+      rect(bx + 38, by + 47, 10, 6, "#3a2a1d");
+
+      // Lavett / kanonvagn
+      rect(bx - 33, by + 8, 74, 28, "#6b3f22");
+      rect(bx - 28, by + 13, 64, 10, "#8b5a32");
+      rect(bx - 18, by + 29, 44, 8, "#4a2d19");
+
+      // Stora hjul i pixelstil
+      rect(bx - 34, by + 28, 24, 24, "#151515");
+      rect(bx - 29, by + 33, 14, 14, "#3a3a3a");
+      rect(bx - 25, by + 37, 6, 6, "#1a1a1a");
+
+      rect(bx + 23, by + 28, 24, 24, "#151515");
+      rect(bx + 28, by + 33, 14, 14, "#3a3a3a");
+      rect(bx + 32, by + 37, 6, 6, "#1a1a1a");
+
+      // Kanonrör, roterat efter vinkel
+      ctx.save();
+      ctx.translate(bx, by + 7);
+      ctx.rotate(-rad);
+
+      // Skugga under röret
+      rect(-4, 6, 76, 10, "rgba(0,0,0,0.25)");
+
+      // Tjock bakdel
+      rect(-14, -13, 26, 26, "#171717");
+      rect(-10, -9, 18, 18, "#2b2b2b");
+
+      // Avsmalnande huvudrör som polygon
+      ctx.fillStyle = "#202020";
+      ctx.beginPath();
+      ctx.moveTo(0, -11);
+      ctx.lineTo(60, -8);
+      ctx.lineTo(70, -13);
+      ctx.lineTo(84, -13);
+      ctx.lineTo(84, 13);
+      ctx.lineTo(70, 13);
+      ctx.lineTo(60, 8);
+      ctx.lineTo(0, 11);
+      ctx.closePath();
+      ctx.fill();
+
+      // Highlight på ovansidan
+      rect(8, -9, 55, 4, "#464646");
+      rect(70, -10, 12, 4, "#575757");
+
+      // Mynningsring
+      rect(76, -16, 12, 32, "#101010");
+      rect(80, -9, 9, 18, "#050505");
+
+      // Liten säkring/fäste bak
+      rect(-20, -5, 8, 10, "#0d0d0d");
+      rect(-24, -2, 5, 4, "#555");
+
+      ctx.restore();
+
+      // Elevationsstöd under röret
+      rect(bx + 12, by + 8, 9, 26, "#3b2a1b");
+      rect(bx + 8, by + 7, 17, 7, "#5b3a22");
+
+      // Liten pixelglans/metalldetaljer
+      rect(bx - 8, by + 14, 6, 4, "#c69c5d");
+      rect(bx + 29, by + 15, 5, 4, "#c69c5d");
+    }
+
+    function drawProjectile() {
+      if (!projectile) return;
+      rect(projectile.x - projectile.r, projectile.y - projectile.r, projectile.r * 2, projectile.r * 2, "#111");
+    }
+
+    function drawIntroScreen() {
+      rect(0, 0, W, H, "rgba(0,0,0,0.58)");
+
+      // Retro-panel
+      rect(140, 78, 680, 365, "#151515");
+      rect(150, 88, 660, 345, "#2b2b2b");
+      rect(160, 98, 640, 325, "#111827");
+      rect(172, 110, 616, 301, "#0f172a");
+
+      // Titel
+      ctx.fillStyle = "#ffef6a";
+      ctx.font = "38px monospace";
+      ctx.textAlign = "center";
+      ctx.fillText("HANTA VIRUS", W / 2, 162);
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "30px monospace";
+      ctx.fillText("SHIP GAME", W / 2, 202);
+
+      // Liten pixelkanon och skepp som dekor
+      rect(235, 250, 55, 15, "#202020");
+      rect(218, 262, 72, 22, "#6b3f22");
+      rect(218, 284, 18, 18, "#111");
+      rect(270, 284, 18, 18, "#111");
+      rect(620, 255, 190, 10, "#101923");
+      rect(655, 228, 95, 26, "#e5eaee");
+      rect(730, 236, 42, 10, "#a9423c");
+
+      ctx.fillStyle = "#dbeafe";
+      ctx.font = "19px monospace";
+      ctx.fillText("Hindra viruset att sprida sig", W / 2, 258);
+      ctx.fillText("genom att sänka båten utanför", W / 2, 288);
+      ctx.fillText("Teneriffas kust med kanonen.", W / 2, 318);
+
+      ctx.fillStyle = "#cbd5e1";
+      ctx.font = "16px monospace";
+      ctx.fillText("Piltangenter: ändra vinkel och kraft", W / 2, 358);
+      ctx.fillText("Space: skjut    R: starta om", W / 2, 382);
+
+      const blink = Math.floor(frame / 28) % 2 === 0;
+      if (blink) {
+        ctx.fillStyle = "#22c55e";
+        ctx.font = "20px monospace";
+        ctx.fillText("TRYCK SPACE / ENTER FÖR ATT STARTA", W / 2, 430);
+      }
+
+      ctx.textAlign = "left";
+    }
+
+    function drawUi() {
+      rect(18, 18, 330, 122, "rgba(0,0,0,0.45)");
+      ctx.fillStyle = "white";
+      ctx.font = "18px monospace";
+      ctx.fillText(`Vinkel: ${Math.round(cannon.angle)}°`, 34, 48);
+      ctx.fillText(`Kraft:  ${Math.round(cannon.power)}%`, 34, 74);
+      ctx.fillText(`Skott:  ${shots}   Poäng: ${score}`, 34, 100);
+      ctx.fillText(`Avstånd: ${Math.max(0, Math.round((1 - ship.approach) * 100))}%`, 34, 126);
+
+      const windText = wind < 0 ? "←" : "→";
+      ctx.fillText(`Vind: ${windText} ${Math.abs(Math.round(wind * 1000))}`, 220, 48);
+
+      if (message) {
+        rect(210, 460, 540, 44, "rgba(0,0,0,0.55)");
+        ctx.fillStyle = "white";
+        ctx.font = "20px monospace";
+        ctx.textAlign = "center";
+        ctx.fillText(message, W / 2, 489);
+        ctx.textAlign = "left";
+      }
+
+      if (ship.hit) {
+        ctx.fillStyle = "white";
+        ctx.font = "28px monospace";
+        ctx.textAlign = "center";
+        const winText = ship.sinking > 230 ? "VÄRLDEN RÄDDAD!, Tryck R" : "TRÄFF! Skeppet bryts itu...";
+        ctx.fillText(winText, W / 2, 145);
+        ctx.textAlign = "left";
+      }
+
+      if (gameOver) {
+        rect(0, 0, W, H, "rgba(80,0,0,0.62)");
+        rect(190, 145, 580, 225, "rgba(0,0,0,0.72)");
+        ctx.fillStyle = "#ffdddd";
+        ctx.font = "34px monospace";
+        ctx.textAlign = "center";
+        ctx.fillText("VIRUSET NÅDDE STRANDEN", W / 2, 215);
+        ctx.font = "22px monospace";
+        ctx.fillText("Alla på Teneriffa blev smittade.", W / 2, 260);
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "20px monospace";
+        ctx.fillText("Tryck R för att försöka igen", W / 2, 318);
+        ctx.textAlign = "left";
+      }
+    }
+
+    function draw() {
+      // Säkerställ att bara skeppet roteras vid träff, inte hela canvasen.
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      drawSky();
+      drawSea();
+      drawShip();
+      drawBeach();
+      drawCannon();
+      drawProjectile();
+      drawUi();
+      if (!gameStarted) drawIntroScreen();
+    }
+
+    function loop() {
+      update();
+      draw();
+      requestAnimationFrame(loop);
+    }
+
+    loop();
+  </script>
+</body>
+</html>
